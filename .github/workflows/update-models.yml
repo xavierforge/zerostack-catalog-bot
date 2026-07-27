@@ -1,0 +1,101 @@
+name: Upstream model catalog PR
+
+# Weekly: regenerate zerostack's data/models.json from models.dev, push the
+# refreshed catalog as a branch on the xavierforge/zerostack fork, and open
+# (or update) a pull request against upstream gi-dellav/zerostack.
+#
+# This lives in its own repo because scheduled workflows only run on a repo's
+# default branch, and the fork keeps `main` level with upstream, so the fork
+# cannot carry a fork-only workflow commit.
+#
+# Required secret: UPSTREAM_PR_PAT, a classic PAT with the `public_repo`
+# scope. It pushes the branch to the fork and opens the PR on upstream in
+# the name of the token's owner.
+
+on:
+  schedule:
+    # Weekly, Mondays 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write # keepalive: reset GitHub's 60-day scheduled-workflow disable timer
+
+env:
+  UPSTREAM: gi-dellav/zerostack
+  FORK: xavierforge/zerostack
+  FORK_OWNER: xavierforge
+  BRANCH: chore/refresh-model-catalog
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out bot scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: bot
+
+      - name: Check out upstream zerostack
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: gi-dellav/zerostack
+          ref: main
+          path: zerostack
+          persist-credentials: false
+
+      # Scheduled workflows in a repo with no commit activity are disabled by
+      # GitHub after 60 days; re-enabling on every run resets that timer.
+      - name: Keep the schedule alive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable update-models.yml --repo "${{ github.repository }}" || echo "keepalive skipped"
+
+      - name: Regenerate catalog
+        run: |
+          cp zerostack/data/models.json old-models.json
+          zerostack/scripts/gen-models-catalog.sh
+
+      - name: Detect changes
+        id: diff
+        run: |
+          if cmp -s old-models.json zerostack/data/models.json; then
+            echo "Catalog unchanged; nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Render PR body
+        if: steps.diff.outputs.changed == 'true'
+        run: bot/scripts/catalog-diff.sh old-models.json zerostack/data/models.json | tee pr-body.md
+
+      - name: Push refresh branch to fork
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_PR_PAT }}
+        run: |
+          cd zerostack
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add data/models.json
+          git commit -m "chore: refresh model catalog from models.dev"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${FORK}.git" "$BRANCH"
+
+      - name: Open or update upstream PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_PR_PAT }}
+        run: |
+          existing="$(gh api "repos/$UPSTREAM/pulls?head=$FORK_OWNER:$BRANCH&state=open" --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --repo "$UPSTREAM" --body-file pr-body.md
+            echo "Updated existing PR #$existing"
+          else
+            gh pr create --repo "$UPSTREAM" --base main \
+              --head "$FORK_OWNER:$BRANCH" \
+              --title "chore: refresh model catalog from models.dev" \
+              --body-file pr-body.md
+          fi
