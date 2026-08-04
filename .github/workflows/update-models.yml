@@ -10,7 +10,9 @@ name: Upstream model catalog PR
 #
 # Required secret: UPSTREAM_PR_PAT, a classic PAT with the `public_repo`
 # scope. It pushes the branch to the fork and opens the PR on upstream in
-# the name of the token's owner.
+# the name of the token's owner. It deliberately does not carry the
+# `workflow` scope, which is why the fork's default branch is fast-forwarded
+# before the push (see the sync step below).
 
 on:
   schedule:
@@ -70,6 +72,23 @@ jobs:
       - name: Render PR body
         if: steps.diff.outputs.changed == 'true'
         run: bot/scripts/catalog-diff.sh old-models.json zerostack/data/models.json | tee pr-body.md
+
+      # The refresh branch is cut from upstream, so pushing it to the fork
+      # carries every upstream commit the fork is still missing. Once one of
+      # those touches .github/workflows/, GitHub rejects the whole push,
+      # because UPSTREAM_PR_PAT has no `workflow` scope. Fast-forwarding the
+      # fork's default branch first is a server-side sync that needs no extra
+      # scope, and it leaves the catalog commit as the only new one in the
+      # push. Left non-fatal on purpose: if the fork has diverged and cannot
+      # fast-forward, the push below is the honest place to fail.
+      - name: Sync fork default branch with upstream
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_PR_PAT }}
+        run: |
+          gh api --method POST "repos/$FORK/merge-upstream" -f branch=main \
+            --jq '"fork main: " + (if .merge_type == "none" then "already level with upstream" else .merge_type end)' \
+            || echo "fork sync failed; see the push step for whether it mattered"
 
       - name: Push refresh branch to fork
         if: steps.diff.outputs.changed == 'true'
