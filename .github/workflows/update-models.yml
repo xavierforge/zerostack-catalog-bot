@@ -110,8 +110,10 @@ jobs:
         run: |
           existing="$(gh api "repos/$UPSTREAM/pulls?head=$FORK_OWNER:$BRANCH&state=open" --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
-            gh pr edit "$existing" --repo "$UPSTREAM" --body-file pr-body.md
-            echo "Updated existing PR #$existing"
+            # Plain REST, not `gh pr edit`: the latter's GraphQL prefetch
+            # needs `read:org`, which UPSTREAM_PR_PAT deliberately lacks.
+            gh api --method PATCH "repos/$UPSTREAM/pulls/$existing" \
+              -F body=@pr-body.md --jq '"Updated existing PR #" + (.number | tostring)'
           else
             gh pr create --repo "$UPSTREAM" --base main \
               --head "$FORK_OWNER:$BRANCH" \
