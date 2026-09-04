@@ -30,11 +30,29 @@ Every Monday 06:00 UTC (or on manual dispatch), `update-models.yml`:
 
 ## Setup
 
-One secret is required: `UPSTREAM_PR_PAT`, a classic personal access token
-with the `public_repo` scope. It pushes the branch to the fork and opens the
-PR on upstream as the token's owner.
+Two secrets are required.
+
+`FORK_SYNC_PAT` is a fine-grained personal access token that syncs the fork's
+default branch and pushes the refresh branch. Create it under GitHub Settings,
+Developer settings, Personal access tokens, Fine-grained tokens, with:
+
+- Resource owner: `xavierforge`
+- Expiration: no expiration
+- Repository access: only `xavierforge/zerostack`
+- Repository permissions: Contents (read and write), Workflows (read and write)
+
+Workflows write is needed because upstream commits routinely touch
+`.github/workflows/` and GitHub rejects any push or fork sync carrying such a
+commit from a token without it.
+
+`UPSTREAM_PR_PAT` is a classic personal access token with the `public_repo`
+scope. It opens the PR on upstream as the token's owner. It has to stay
+classic: fine-grained tokens cannot contribute to public repositories the
+owner is not a member of. Until `FORK_SYNC_PAT` is set, the workflow falls
+back to this token for the sync and push steps as well.
 
 ```sh
+gh secret set FORK_SYNC_PAT --repo xavierforge/zerostack-catalog-bot
 gh secret set UPSTREAM_PR_PAT --repo xavierforge/zerostack-catalog-bot
 ```
 
