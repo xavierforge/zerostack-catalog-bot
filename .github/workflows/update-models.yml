@@ -8,11 +8,18 @@ name: Upstream model catalog PR
 # default branch, and the fork keeps `main` level with upstream, so the fork
 # cannot carry a fork-only workflow commit.
 #
-# Required secret: UPSTREAM_PR_PAT, a classic PAT with the `public_repo`
-# scope. It pushes the branch to the fork and opens the PR on upstream in
-# the name of the token's owner. It deliberately does not carry the
-# `workflow` scope, which is why the fork's default branch is fast-forwarded
-# before the push (see the sync step below).
+# Secrets:
+# - FORK_SYNC_PAT: a fine-grained PAT limited to the xavierforge/zerostack
+#   fork, with Contents and Workflows write. Syncs the fork's default branch
+#   and pushes the refresh branch. Workflows write is required because
+#   upstream commits routinely touch .github/workflows/ (dependabot bumps),
+#   and GitHub rejects any push or merge-upstream carrying such a commit
+#   from a token without it.
+# - UPSTREAM_PR_PAT: a classic PAT with the `public_repo` scope. Opens the
+#   PR on upstream in the name of the token's owner. Stays classic because
+#   fine-grained tokens cannot contribute to public repos the owner is not
+#   a member of. It also serves as the fallback for FORK_SYNC_PAT while that
+#   secret is unset, which reproduces the pre-September-2026 behaviour.
 
 on:
   schedule:
@@ -74,17 +81,19 @@ jobs:
         run: bot/scripts/catalog-diff.sh old-models.json zerostack/data/models.json | tee pr-body.md
 
       # The refresh branch is cut from upstream, so pushing it to the fork
-      # carries every upstream commit the fork is still missing. Once one of
-      # those touches .github/workflows/, GitHub rejects the whole push,
-      # because UPSTREAM_PR_PAT has no `workflow` scope. Fast-forwarding the
-      # fork's default branch first is a server-side sync that needs no extra
-      # scope, and it leaves the catalog commit as the only new one in the
-      # push. Left non-fatal on purpose: if the fork has diverged and cannot
-      # fast-forward, the push below is the honest place to fail.
+      # carries every upstream commit the fork is still missing. Keeping the
+      # fork's default branch level first leaves the catalog commit as the
+      # only new one in the push. This is a server-side fast-forward, but it
+      # still needs Workflows write on the token whenever a pending upstream
+      # commit touches .github/workflows/; the 2026-08-31 run failed here with
+      # a 422 for exactly that reason. Left non-fatal on purpose: with
+      # FORK_SYNC_PAT set the push below succeeds regardless, and if the fork
+      # has diverged and cannot fast-forward, the push is the honest place to
+      # fail.
       - name: Sync fork default branch with upstream
         if: steps.diff.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.UPSTREAM_PR_PAT }}
+          GH_TOKEN: ${{ secrets.FORK_SYNC_PAT || secrets.UPSTREAM_PR_PAT }}
         run: |
           gh api --method POST "repos/$FORK/merge-upstream" -f branch=main \
             --jq '"fork main: " + (if .merge_type == "none" then "already level with upstream" else .merge_type end)' \
@@ -93,7 +102,7 @@ jobs:
       - name: Push refresh branch to fork
         if: steps.diff.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.UPSTREAM_PR_PAT }}
+          GH_TOKEN: ${{ secrets.FORK_SYNC_PAT || secrets.UPSTREAM_PR_PAT }}
         run: |
           cd zerostack
           git config user.name "github-actions[bot]"
