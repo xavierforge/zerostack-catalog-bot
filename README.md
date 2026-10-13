@@ -1,7 +1,8 @@
 # zerostack-catalog-bot
 
 Weekly automation that keeps [zerostack](https://github.com/gi-dellav/zerostack)'s
-embedded model catalog (`data/models.json`) in sync with
+embedded model catalog (`data/models.json` and the derived
+`data/opencode-transports.json`) in sync with
 [models.dev](https://models.dev), by opening a pull request against upstream.
 
 ## Why a separate repo
@@ -18,7 +19,7 @@ Every Monday 06:00 UTC (or on manual dispatch), `update-models.yml`:
 
 1. Checks out upstream `gi-dellav/zerostack` at `main`.
 2. Runs upstream's own `scripts/gen-models-catalog.sh` to regenerate
-   `data/models.json`.
+   `data/models.json` and `data/opencode-transports.json`.
 3. Stops if nothing changed.
 4. Renders a fixed-format change summary (`scripts/catalog-diff.sh`): a
    per-provider totals table, then Added/Removed/Changed lists with model

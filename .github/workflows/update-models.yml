@@ -1,6 +1,7 @@
 name: Upstream model catalog PR
 
-# Weekly: regenerate zerostack's data/models.json from models.dev, push the
+# Weekly: regenerate zerostack's data/models.json (and the derived
+# data/opencode-transports.json) from models.dev, push the
 # refreshed catalog as a branch on the xavierforge/zerostack fork, and open
 # (or update) a pull request against upstream gi-dellav/zerostack.
 #
@@ -108,7 +109,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
-          git add data/models.json
+          git add data/models.json data/opencode-transports.json
           git commit -m "chore: refresh model catalog from models.dev"
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${FORK}.git" "$BRANCH"
 
